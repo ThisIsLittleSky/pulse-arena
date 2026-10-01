@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const hellBots = require('./hell-bots');
 
 const PORT = Number(process.env.PORT) || 4001;
 const HOST = '0.0.0.0';
@@ -242,6 +243,7 @@ const CONFIG_FILE = path.join(__dirname, 'config.json');
 const DEFAULT_CLASSES = JSON.parse(JSON.stringify(CLASSES));
 const DEFAULT_TARGET_KILLS = TARGET_KILLS;
 const allSockets = new Set();
+const spectators = new Set();
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -264,6 +266,9 @@ let roundStartedAt = Date.now();
 const MAP_PICK_MS = 12000;
 let mapPickUntil = 0;
 let mapPickWinnerId = null;
+let botMapPickAt = 0;
+let botCount = hellBots.DEFAULT_BOT_COUNT;
+let botsFight = true; // Bot 是否互相攻击
 let nextPid = 1;
 let nextTurretId = 1;
 let nextZoneId = 1;
@@ -274,6 +279,11 @@ let lbDirty = true;
 let lastSentSafeR = -1;
 let snapSeq = 0; // 偶数 tick 才广播，逻辑 60Hz / 快照 30Hz
 
+const countHumans = () => {
+  let n = 0;
+  for (const p of players.values()) if (!p.isBot) n++;
+  return n;
+};
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
 function packObstacles() {
@@ -334,6 +344,7 @@ function startMapPick(winner) {
   const now = Date.now();
   mapPickUntil = now + MAP_PICK_MS;
   mapPickWinnerId = winner ? winner.id : null;
+  botMapPickAt = (winner && winner.isBot) ? now + 1600 : 0;
   for (const pl of players.values()) {
     pl.kills = 0; pl.deaths = 0; pl.assists = 0; pl.streak = 0;
     if (pl.dmgFrom) pl.dmgFrom.clear();
@@ -353,6 +364,7 @@ function finishMapPick(choice, pickerName) {
   if (!mapPickUntil) return;
   mapPickUntil = 0;
   mapPickWinnerId = null;
+  botMapPickAt = 0;
   const idx = resolveMapIndex(choice);
   loadMap(idx);
   const now = Date.now();
@@ -471,7 +483,7 @@ function respawn(p, now) {
   clearPlayerFx(p);
   p.invulnUntil = now + SPAWN_GRACE_MS;
   if (p.dmgFrom) p.dmgFrom.clear();
-  sendJSON(p.socket, { t: 'respawn' });
+  if (p.socket) sendJSON(p.socket, { t: 'respawn' });
 }
 
 function mapPayload() {
@@ -492,7 +504,7 @@ const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const wsAccept = (key) => crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
 
 function sendFrame(socket, payload) {
-  if (socket.destroyed || !socket.writable) return;
+  if (!socket || socket.destroyed || !socket.writable) return;
   const data = typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload;
   const len = data.length;
   let header;
@@ -505,7 +517,53 @@ function sendFrame(socket, payload) {
   }
   socket.write(Buffer.concat([header, data]));
 }
-const sendJSON = (socket, obj) => sendFrame(socket, JSON.stringify(obj));
+const sendJSON = (socket, obj) => {
+  if (!socket || socket.destroyed) return;
+  sendFrame(socket, JSON.stringify(obj));
+};
+
+function initPayload(extra) {
+  return Object.assign({
+    t: 'init', arenaR: ARENA_R, tick: TICK_MS,
+    target: TARGET_KILLS, classes: CLASSES, colors: COLORS, pickupTypes: PICKUP_TYPES,
+    maps: mapsList(),
+    map: mapPayload(),
+    obstacles: packObstacles(),
+    pickups: pickups.map((k) => [k.x, k.y, k.type, k.active ? 1 : 0]),
+    botCount, botsFight,
+    mapPick: mapPickUntil ? mapPickPayload({
+      winner: (() => {
+        const w = players.get(mapPickWinnerId);
+        return w ? w.name : '';
+      })(),
+      ci: (() => {
+        const w = players.get(mapPickWinnerId);
+        return w ? w.ci : 0;
+      })()
+    }) : null
+  }, extra || {});
+}
+
+function applyBotSettings(count, fight, persist) {
+  let changed = false;
+  if (count != null && Number.isFinite(Number(count))) {
+    const n = clamp(Math.round(Number(count)), 0, 3);
+    if (n !== botCount) { botCount = n; changed = true; }
+  }
+  if (fight != null) {
+    const f = !!fight;
+    if (f !== botsFight) { botsFight = f; changed = true; }
+  }
+  const world = botWorld(Date.now(), 0);
+  hellBots.syncBots(world, botCount);
+  lbDirty = true;
+  if (persist) saveConfig();
+  if (changed) {
+    log(`🤖 Bot 设置 → 数量 ${botCount} · 互殴 ${botsFight ? '开' : '关'}`);
+    broadcast({ t: 'botSettings', botCount, botsFight });
+  }
+  return changed;
+}
 
 function attach(socket) {
   let buf = Buffer.alloc(0);
@@ -565,37 +623,42 @@ function handleMessage(socket, msg) {
     return;
   }
 
+  if (msg.t === 'spectate') {
+    if (p || socket._spectator) return;
+    if (msg.botCount != null || msg.botsFight != null) {
+      applyBotSettings(msg.botCount, msg.botsFight, true);
+    }
+    socket._spectator = true;
+    spectators.add(socket);
+    sendJSON(socket, initPayload({ id: null, spectate: true }));
+    log(`👁️ 观战加入 (观战 ${spectators.size} · 玩家 ${countHumans()} · Bot ${players.size - countHumans()})`);
+    return;
+  }
+
+  if (msg.t === 'botSettings') {
+    applyBotSettings(msg.botCount, msg.botsFight, true);
+    sendJSON(socket, { t: 'botSettings', botCount, botsFight });
+    return;
+  }
+
   if (msg.t === 'join') {
-    if (p) return;
-    const wasEmpty = players.size === 0;
+    if (p || socket._spectator) return;
+    if (msg.botCount != null || msg.botsFight != null) {
+      applyBotSettings(msg.botCount, msg.botsFight, true);
+    }
+    const humansBefore = countHumans();
     const player = makePlayer(msg.name, msg.cls, msg.ci);
     setStats(player);
     player.socket = socket;
     socket._player = player;
     players.set(player.id, player);
     lbDirty = true;
-    if (wasEmpty && !mapPickUntil) {
+    // 仅有 Bot / 空场时，首个人类的选图生效
+    if (humansBefore === 0 && !mapPickUntil) {
       loadMap(resolveMapIndex(msg.map));
     }
-    sendJSON(socket, {
-      t: 'init', id: player.id, arenaR: ARENA_R, tick: TICK_MS,
-      target: TARGET_KILLS, classes: CLASSES, colors: COLORS, pickupTypes: PICKUP_TYPES,
-      maps: mapsList(),
-      map: mapPayload(),
-      obstacles: packObstacles(),
-      pickups: pickups.map((k) => [k.x, k.y, k.type, k.active ? 1 : 0]),
-      mapPick: mapPickUntil ? mapPickPayload({
-        winner: (() => {
-          const w = players.get(mapPickWinnerId);
-          return w ? w.name : '';
-        })(),
-        ci: (() => {
-          const w = players.get(mapPickWinnerId);
-          return w ? w.ci : 0;
-        })()
-      }) : null
-    });
-    log(`🟢 ${player.name}(${CLASSES[player.cls].name}) 进入 · ${mapMeta.name} (在线 ${players.size} 人)`);
+    sendJSON(socket, initPayload({ id: player.id, spectate: false }));
+    log(`🟢 ${player.name}(${CLASSES[player.cls].name}) 进入 · ${mapMeta.name} (人类 ${countHumans()} · 总 ${players.size})`);
   } else if (msg.t === 'pickMap' && p) {
     if (!mapPickUntil) return;
     finishMapPick(msg.map, p.name);
@@ -778,6 +841,8 @@ function segmentHit(px, py, qx, qy, x1, y1, x2, y2, rad) {
 function hurtPlayer(p, dmg, ownerId, dirX, dirY, now, opts) {
   opts = opts || {};
   if (!p.alive) return false;
+  const owner = ownerId ? players.get(ownerId) : null;
+  if (!botsFight && owner && owner.isBot && p.isBot) return false;
   const immune = now < p.shieldUntil || now < p.invulnUntil || now < p.phaseUntil;
   if (immune && !opts.ignoreImmune) return false;
 
@@ -808,7 +873,6 @@ function hurtPlayer(p, dmg, ownerId, dirX, dirY, now, opts) {
     p.slowMult = opts.slowMult || 0.55;
   }
   if (opts.siphon && ownerId) {
-    const owner = players.get(ownerId);
     if (owner && owner.alive) {
       owner.stolenUntil = now + 2200;
       owner.stolenMult = 1.25;
@@ -816,11 +880,10 @@ function hurtPlayer(p, dmg, ownerId, dirX, dirY, now, opts) {
       p.slowMult = 0.7;
     }
   }
-  const owner = ownerId ? players.get(ownerId) : null;
   if (opts.ls > 0 && owner && owner.alive) {
     owner.hp = Math.min(owner.maxHp, owner.hp + dmg * opts.ls);
   }
-  sendJSON(p.socket, { t: 'hit', dmg, dir: Math.atan2(dirY || 0, dirX || 1) });
+  if (p.socket) sendJSON(p.socket, { t: 'hit', dmg, dir: Math.atan2(dirY || 0, dirX || 1) });
   if (owner && owner.socket) {
     sendJSON(owner.socket, { t: 'hc', x: Math.round(p.x), y: Math.round(p.y), dmg });
   }
@@ -879,7 +942,7 @@ function kill(p, killerId, now) {
     killer.streak = (killer.streak || 0) + 1;
     streak = killer.streak;
   }
-  sendJSON(p.socket, { t: 'death', by: kname });
+  if (p.socket) sendJSON(p.socket, { t: 'death', by: kname });
   broadcast({ t: 'kill', k: kname, v: p.name, ci: killer ? killer.ci : 0, streak });
   lbDirty = true;
   if (killer && killer.kills >= TARGET_KILLS && !mapPickUntil) roundWin(killer);
@@ -892,11 +955,33 @@ function roundWin(p) {
   log(`🏆 ${p.name} 率先达成 ${TARGET_KILLS} 杀, 进入选图`);
 }
 
+function botWorld(now, dt) {
+  return {
+    now, dt, players, proj, obstacles, pickups, healPads, safeR, zones, walls,
+    turrets, CLASSES, COLORS, SHIP_R, ENERGY_MAX, mapPickUntil,
+    botCount, botsFight,
+    tryDash, tryAbility, makePlayer, setStats, log,
+    dist2, clamp, rand
+  };
+}
+
 /* ============================ 游戏循环 ============================ */
 function tick(now, dt) {
   if (mapPickUntil) {
+    if (botMapPickAt && now >= botMapPickAt) {
+      botMapPickAt = 0;
+      const w = players.get(mapPickWinnerId);
+      finishMapPick('random', w ? w.name : null);
+      return;
+    }
     if (now >= mapPickUntil) finishMapPick('random', null);
     return;
+  }
+
+  // 地狱 Bot 决策（写入 moveX/moveY/angle/shooting，再走同一套物理）
+  const world = botWorld(now, dt);
+  for (const p of players.values()) {
+    if (p.isBot) hellBots.updateBot(p, world);
   }
 
   // 脉冲井缩圈
@@ -1096,6 +1181,10 @@ function tick(now, dt) {
     let target = null, best = TURRET_RANGE * TURRET_RANGE;
     for (const p of players.values()) {
       if (!p.alive || p.id === t.ownerId) continue;
+      if (!botsFight) {
+        const owner = players.get(t.ownerId);
+        if (owner && owner.isBot && p.isBot) continue;
+      }
       // 相位且未被揭示则不锁
       if (Date.now() < p.phaseUntil && Date.now() >= p.revealUntil) continue;
       const d2 = dist2(t.x, t.y, p.x, p.y);
@@ -1224,6 +1313,7 @@ function broadcastState(now) {
   const shared = JSON.stringify(base);
   const sharedHead = shared.slice(0, -1);
   for (const pl of players.values()) {
+    if (!pl.socket) continue;
     // my: [hp,maxHp,energy,kills,deaths,wins,assists,streak,dashCdCs,abilityCdCs,alive,ping,jitter]
     const my = JSON.stringify([
       Math.max(0, Math.round(pl.hp)), pl.maxHp, Math.round(pl.energy),
@@ -1234,11 +1324,18 @@ function broadcastState(now) {
     ]);
     sendFrame(pl.socket, sharedHead + ',"my":' + my + '}');
   }
+  // 观战端只收公共快照
+  if (spectators.size) {
+    for (const s of spectators) sendFrame(s, shared);
+  }
 }
 
 function broadcast(obj) {
   const payload = JSON.stringify(obj);
-  for (const p of players.values()) sendFrame(p.socket, payload);
+  for (const p of players.values()) {
+    if (p.socket) sendFrame(p.socket, payload);
+  }
+  for (const s of spectators) sendFrame(s, payload);
 }
 
 /* ============================ 管理员配置(热更新) ============================ */
@@ -1279,6 +1376,8 @@ function handleAdmin(socket, msg) {
 function getConfigPayload() {
   return {
     targetKills: TARGET_KILLS,
+    botCount,
+    botsFight,
     map: mapPayload(),
     maps: mapsList(),
     classes: CLASSES.map((c) => ({
@@ -1309,6 +1408,10 @@ function applyConfig(cfg) {
   }
   const tk = Number(cfg.targetKills);
   if (Number.isFinite(tk)) TARGET_KILLS = clamp(Math.round(tk), 1, 1000);
+  if (cfg.botCount != null && Number.isFinite(Number(cfg.botCount))) {
+    botCount = clamp(Math.round(Number(cfg.botCount)), 0, 3);
+  }
+  if (cfg.botsFight != null) botsFight = !!cfg.botsFight;
   resyncPlayers();
   return null;
 }
@@ -1393,32 +1496,43 @@ server.on('upgrade', (req, socket) => {
 
 function onClose(socket) {
   allSockets.delete(socket);
+  if (socket._spectator) {
+    spectators.delete(socket);
+    log(`👁️ 观战离开 (观战 ${spectators.size})`);
+    return;
+  }
   const p = socket._player;
   if (!p) return;
   players.delete(p.id);
   turrets = turrets.filter((t) => t.ownerId !== p.id);
   zones = zones.filter((z) => z.ownerId !== p.id);
   walls = walls.filter((w) => w.ownerId !== p.id);
-  if (players.size === 0) {
-    mapPickUntil = 0;
-    mapPickWinnerId = null;
-  }
-  log(`🔴 ${p.name} 离开竞技场 (在线 ${players.size} 人)`);
+  lbDirty = true;
+  log(`🔴 ${p.name} 离开竞技场 (人类 ${countHumans()} · 总 ${players.size})`);
 }
 
 setInterval(() => {
   const now = Date.now();
   for (const p of players.values()) {
+    if (!p.socket) continue;
     if (now - p.socket._lastSeen > 60000) { p.socket.destroy(); continue; }
     const h = Buffer.alloc(2); h[0] = 0x89; h[1] = 0;
     p.socket.write(h);
+  }
+  for (const s of spectators) {
+    if (now - s._lastSeen > 60000) { s.destroy(); continue; }
+    const h = Buffer.alloc(2); h[0] = 0x89; h[1] = 0;
+    s.write(h);
   }
 }, 20000);
 
 setInterval(() => {
   const ts = Date.now();
   const payload = JSON.stringify({ t: 'ping', ts });
-  for (const p of players.values()) sendFrame(p.socket, payload);
+  for (const p of players.values()) {
+    if (p.socket) sendFrame(p.socket, payload);
+  }
+  for (const s of spectators) sendFrame(s, payload);
 }, 1000);
 
 function lanIP() {
@@ -1433,6 +1547,7 @@ function lanIP() {
 
 loadMap(0);
 loadConfig();
+hellBots.syncBots(botWorld(Date.now(), 0), botCount);
 
 server.listen(PORT, HOST, () => {
   console.log('========================================================');
@@ -1441,6 +1556,7 @@ server.listen(PORT, HOST, () => {
   console.log('  局域网访问:   http://' + lanIP() + ':' + PORT);
   console.log('  地图: ' + MAPS.map((m) => m.name).join(' / '));
   console.log('  职业: ' + CLASSES.length + ' 款 · 开局/回合后可选图或随机');
+  console.log('  地狱 Bot:    ' + botCount + ' 台 · 互殴 ' + (botsFight ? '开' : '关') + ' (首页可调)');
   console.log('========================================================');
 });
 

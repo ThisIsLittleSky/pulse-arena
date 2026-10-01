@@ -146,6 +146,54 @@
   }
   button:hover { filter: brightness(1.1); transform: translateY(-1px); }
   button:active { transform: translateY(0) scale(.98); }
+  button.ghost {
+    margin-top: 8px; background: transparent; color: #c5d0ef;
+    border: 1px solid rgba(46,204,255,0.45); box-shadow: none;
+  }
+  button.ghost:hover { background: rgba(46,204,255,0.12); filter: none; }
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; }
+  .btn-row button { margin-top: 0; }
+  .bot-panel {
+    margin-top: 10px; padding: 10px 12px; border-radius: 12px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  }
+  .bot-panel .bot-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-top: 8px; flex-wrap: wrap;
+  }
+  .bot-panel .bot-row:first-child { margin-top: 0; }
+  .bot-panel .bot-label { font-size: 12px; color: #9aa6c4; font-weight: 600; }
+  .bot-count { display: flex; gap: 6px; }
+  .bot-count button {
+    width: 36px; margin: 0; padding: 7px 0; font-size: 13px; font-weight: 800;
+    border-radius: 8px; background: rgba(255,255,255,0.06); color: #c5d0ef;
+    border: 1px solid rgba(255,255,255,0.12); box-shadow: none;
+  }
+  .bot-count button.sel {
+    background: linear-gradient(90deg, #2eccff, #7c5cff); border-color: transparent; color: #fff;
+  }
+  .toggle {
+    display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
+    font-size: 12px; color: #c5d0ef; font-weight: 600;
+  }
+  .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .toggle .track {
+    width: 40px; height: 22px; border-radius: 999px; background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.15); position: relative; transition: background .15s;
+  }
+  .toggle .track::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; transition: transform .15s;
+  }
+  .toggle input:checked + .track { background: rgba(46,204,255,0.45); border-color: #2eccff; }
+  .toggle input:checked + .track::after { transform: translateX(18px); }
+  #hudSpec {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    background: rgba(8,12,24,0.78); border: 1px solid rgba(46,204,255,0.35);
+    color: #cfe9ff; pointer-events: none; white-space: nowrap; z-index: 5;
+  }
+  #hudSpec .hint { opacity: 0.7; font-weight: 500; font-size: 11px; margin-left: 8px; }
 
   .tips { margin-top: 10px; font-size: 12px; color: #7d87a3; line-height: 1.75; text-align: left; }
   .tips b { color: #ffd166; font-weight: 600; }
@@ -182,6 +230,7 @@
 <div id="hudLayer" class="hidden">
   <div id="hudMap"></div>
   <div id="hudBanner"></div>
+  <div id="hudSpec" class="hidden">观战中</div>
   <div id="hudLb"></div>
   <div id="hudStats">
     <div class="name" id="hudCls"></div>
@@ -200,7 +249,7 @@
 <div id="joinScreen" class="overlay">
   <div class="card">
     <h1>⚡ 脉冲竞技场</h1>
-        <div class="sub">Pulse Arena · 14 机甲 · 8 地图 —— 开局与回合后可选图或随机，夺取 3 杀桂冠</div>
+        <div class="sub">Pulse Arena · 14 机甲 · 8 地图 · 地狱 Bot 常驻 —— 开局与回合后可选图或随机，夺取 3 杀桂冠</div>
     <input id="nameInput" maxlength="14" placeholder="输入你的呼号 (昵称)" autocomplete="off">
     <div class="row-label">选择机甲 (职业)</div>
     <div class="classes" id="classList"></div>
@@ -208,11 +257,35 @@
     <div class="swatches" id="colorList"></div>
     <div class="row-label">选择地图 · 也可随机</div>
     <div class="maps" id="mapList"></div>
-    <button id="startBtn">进入竞技场</button>
+    <div class="row-label">地狱 Bot 设置</div>
+    <div class="bot-panel">
+      <div class="bot-row">
+        <span class="bot-label">常驻数量</span>
+        <div class="bot-count" id="botCountList">
+          <button type="button" data-n="0">0</button>
+          <button type="button" data-n="1">1</button>
+          <button type="button" data-n="2">2</button>
+          <button type="button" data-n="3" class="sel">3</button>
+        </div>
+      </div>
+      <div class="bot-row">
+        <span class="bot-label">Bot 互相攻击</span>
+        <label class="toggle">
+          <input type="checkbox" id="botsFightToggle" checked>
+          <span class="track"></span>
+          <span id="botsFightLabel">开启</span>
+        </label>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button id="startBtn" type="button">进入竞技场</button>
+      <button id="spectateBtn" class="ghost" type="button">观战模式</button>
+    </div>
     <div class="tips">
       ⌨️ <b>WASD</b>/方向键 移动 · 🖱️ 鼠标瞄准 · <b>左键</b>(按住)射击 · 🛞 滚轮缩放视野<br>
       <span class="keys">空格</span>/<span class="keys">Shift</span> <b>冲刺</b>(无敌帧·耗能量) · <span class="keys">右键</span>/<span class="keys">E</span> <b>职业技能</b><br>
-      🪨 善用掩体走位 · ⚡ 冲刺可躲子弹 · ❤️⚡🚀💥 拾取增益道具
+      🪨 善用掩体走位 · ⚡ 冲刺可躲子弹 · ❤️⚡🚀💥 拾取增益道具<br>
+      👁️ 观战：<span class="keys">Tab</span> 切换跟随 · <span class="keys">F</span> 自由视角 · <span class="keys">WASD</span> 平移
     </div>
     <a class="admin-link" href="/admin" target="_blank">⚙️ 管理后台</a>
   </div>
@@ -320,6 +393,12 @@ ctx.measureText = function () { return { width: 0 }; };
 
 let ws = null;
 let myId = null, myCls = 0, myCi = 0, myMapKey = 'random';
+let isSpectating = false;
+let joined = false;
+let followId = null;
+let freeCam = false;
+let botCountPref = 3;
+let botsFightPref = true;
 let mapPickUntil = 0;
 let arenaR = 1300, TICK = 25, TARGET = 3, safeR = 1300;
 let obstacles = [];          // {x,y,r,destructible,hp,maxHp}
@@ -461,7 +540,55 @@ function buildMenu() {
     myMapKey = key;
     $('mapList').querySelectorAll('.map-card').forEach(e => e.classList.toggle('sel', e === el));
   });
+  initBotPrefsUI();
 }
+
+function loadBotPrefsLocal() {
+  try {
+    const raw = localStorage.getItem('pulseArenaBot');
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    if (o && o.botCount != null) botCountPref = clamp(Math.round(Number(o.botCount)), 0, 3);
+    if (o && o.botsFight != null) botsFightPref = !!o.botsFight;
+  } catch (_) {}
+}
+
+function saveBotPrefsLocal() {
+  try {
+    localStorage.setItem('pulseArenaBot', JSON.stringify({ botCount: botCountPref, botsFight: botsFightPref }));
+  } catch (_) {}
+}
+
+function applyBotPrefsUI() {
+  $('botCountList').querySelectorAll('button').forEach((btn) => {
+    btn.classList.toggle('sel', Number(btn.dataset.n) === botCountPref);
+  });
+  const tog = $('botsFightToggle');
+  tog.checked = !!botsFightPref;
+  $('botsFightLabel').textContent = botsFightPref ? '开启' : '关闭';
+}
+
+function initBotPrefsUI() {
+  loadBotPrefsLocal();
+  applyBotPrefsUI();
+  $('botCountList').querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      botCountPref = clamp(Number(btn.dataset.n) || 0, 0, 3);
+      applyBotPrefsUI();
+      saveBotPrefsLocal();
+    });
+  });
+  $('botsFightToggle').addEventListener('change', () => {
+    botsFightPref = !!$('botsFightToggle').checked;
+    applyBotPrefsUI();
+    saveBotPrefsLocal();
+  });
+}
+
+function botSettingsPayload() {
+  return { botCount: botCountPref, botsFight: botsFightPref };
+}
+
 buildMenu();
 
 // 启动时拉取服务器最新配置, 让大厅卡片同步显示管理员调整后的数值
@@ -470,6 +597,10 @@ fetch('/api/config')
   .then((cfg) => {
     syncClasses(cfg.classes);
     if (cfg.targetKills != null) TARGET = cfg.targetKills;
+    if (cfg.botCount != null) botCountPref = clamp(Math.round(Number(cfg.botCount)), 0, 3);
+    if (cfg.botsFight != null) botsFightPref = !!cfg.botsFight;
+    loadBotPrefsLocal();
+    applyBotPrefsUI();
     if (Array.isArray(cfg.maps) && cfg.maps.length) {
       MAP_CATALOG = cfg.maps;
       renderMapCards($('mapList'), myMapKey, (key, el) => {
@@ -482,22 +613,32 @@ fetch('/api/config')
   .catch(() => {});
 
 /* ================= WebSocket ================= */
-function connect() {
+function connect(asSpectator) {
   const inp = $('nameInput');
-  const name = inp.value.trim();
-  if (!name) {
-    inp.placeholder = '⚠️ 请先输入呼号';
-    inp.focus();
+  isSpectating = !!asSpectator;
+  if (!isSpectating) {
+    const name = inp.value.trim();
+    if (!name) {
+      inp.placeholder = '⚠️ 请先输入呼号';
+      inp.focus();
+      inp.classList.remove('shake');
+      void inp.offsetWidth;
+      inp.classList.add('shake');
+      return;
+    }
     inp.classList.remove('shake');
-    void inp.offsetWidth;
-    inp.classList.add('shake');
-    return;
+    inp.placeholder = '输入你的呼号 (昵称)';
   }
-  inp.classList.remove('shake');
-  inp.placeholder = '输入你的呼号 (昵称)';
+  saveBotPrefsLocal();
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(proto + '://' + location.host);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, cls: myCls, ci: myCi, map: myMapKey }));
+  ws.onopen = () => {
+    const bots = botSettingsPayload();
+    if (isSpectating) ws.send(JSON.stringify(Object.assign({ t: 'spectate' }, bots)));
+    else ws.send(JSON.stringify(Object.assign({
+      t: 'join', name: inp.value.trim(), cls: myCls, ci: myCi, map: myMapKey
+    }, bots)));
+  };
   ws.onmessage = (e) => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.t === 'init') onInit(m);
@@ -511,6 +652,11 @@ function connect() {
     else if (m.t === 'mapPick') onMapPick(m);
     else if (m.t === 'map') onMap(m);
     else if (m.t === 'config') onConfig(m);
+    else if (m.t === 'botSettings') {
+      if (m.botCount != null) botCountPref = clamp(Math.round(Number(m.botCount)), 0, 3);
+      if (m.botsFight != null) botsFightPref = !!m.botsFight;
+      applyBotPrefsUI();
+    }
     else if (m.t === 'ping') ws.send(JSON.stringify({ t: 'pong', ts: m.ts }));
   };
   ws.onclose = () => { if (!window.__leaving) $('reconnectScreen').classList.remove('hidden'); };
@@ -533,7 +679,9 @@ function parseObstacles(arr) {
 }
 
 function onInit(m) {
-  myId = m.id;
+  isSpectating = !!m.spectate;
+  myId = m.id == null ? null : m.id;
+  joined = true;
   arenaR = m.arenaR; TICK = m.tick; TARGET = m.target; safeR = m.arenaR;
   syncClasses(m.classes);
   if (Array.isArray(m.maps) && m.maps.length) MAP_CATALOG = m.maps;
@@ -545,13 +693,21 @@ function onInit(m) {
   pred = { x: 0, y: 0, ang: 0 }; localDashUntil = 0; localFireCd = 0;
   ghosts = []; localFx = { shieldUntil: 0, phaseUntil: 0, overdriveUntil: 0, pierceUntil: 0, bloodUntil: 0, reflectUntil: 0, stormUntil: 0, siphonUntil: 0, speedUntil: 0 };
   particles = []; dmgNums = []; killfeed = [];
-  alive = true; my = { hp: 100, maxHp: 100, energy: 100, kills: 0, deaths: 0, wins: 0, assists: 0, streak: 0, dashCd: 0, abilityCd: 0, alive: 1 };
-  cam = { x: 0, y: 0, scale: 1, targetScale: 1 };
+  alive = !isSpectating; my = { hp: 100, maxHp: 100, energy: 100, kills: 0, deaths: 0, wins: 0, assists: 0, streak: 0, dashCd: 0, abilityCd: 0, alive: 1 };
+  cam = { x: 0, y: 0, scale: 1, targetScale: isSpectating ? 0.85 : 1 };
+  followId = null; freeCam = false;
   ensureAudio();
   $('joinScreen').classList.add('hidden');
   $('deathScreen').classList.add('hidden');
   $('reconnectScreen').classList.add('hidden');
   $('hudLayer').classList.remove('hidden');
+  if (isSpectating) {
+    $('hudSpec').classList.remove('hidden');
+    $('hudStats').style.opacity = '0.35';
+  } else {
+    $('hudSpec').classList.add('hidden');
+    $('hudStats').style.opacity = '';
+  }
   if (m.mapPick) onMapPick(m.mapPick);
   else {
     hideMapPick();
@@ -568,12 +724,22 @@ function onMapPick(m) {
   if (Array.isArray(m.maps) && m.maps.length) MAP_CATALOG = m.maps;
   mapPickUntil = m.until || (Date.now() + 12000);
   const sub = $('mapPickSub');
-  if (m.winner) sub.innerHTML = '<b>' + m.winner + '</b> 率先达成目标 · 选择下一张地图，或点随机';
-  else sub.textContent = '回合结束 · 选择下一张地图，或点随机';
-  renderMapCards($('mapPickList'), null, (key) => {
-    if (!ws || ws.readyState !== 1) return;
-    ws.send(JSON.stringify({ t: 'pickMap', map: key }));
-  });
+  if (isSpectating) {
+    if (m.winner) sub.innerHTML = '观战中 · <b>' + m.winner + '</b> 获胜，等待选图…';
+    else sub.textContent = '观战中 · 回合结束，等待选图…';
+    $('mapPickList').style.pointerEvents = 'none';
+    $('mapPickList').style.opacity = '0.55';
+    renderMapCards($('mapPickList'), null, () => {});
+  } else {
+    if (m.winner) sub.innerHTML = '<b>' + m.winner + '</b> 率先达成目标 · 选择下一张地图，或点随机';
+    else sub.textContent = '回合结束 · 选择下一张地图，或点随机';
+    $('mapPickList').style.pointerEvents = '';
+    $('mapPickList').style.opacity = '';
+    renderMapCards($('mapPickList'), null, (key) => {
+      if (!ws || ws.readyState !== 1) return;
+      ws.send(JSON.stringify({ t: 'pickMap', map: key }));
+    });
+  }
   $('mapPickScreen').classList.remove('hidden');
   $('deathScreen').classList.add('hidden');
 }
@@ -667,6 +833,7 @@ function onState(m) {
 }
 
 function onDeath(m) {
+  if (isSpectating) return;
   alive = false; deadBy = m.by; lastDeathTime = Date.now();
   $('deathBy').textContent = '击坠者：' + deadBy;
   $('deathScreen').classList.remove('hidden');
@@ -676,6 +843,7 @@ function onDeath(m) {
 }
 
 function onRespawn() {
+  if (isSpectating) return;
   alive = true; $('deathScreen').classList.add('hidden');
   lastSnapTime = 0; localDashUntil = 0; ghosts = [];
   localFx = { shieldUntil: 0, phaseUntil: 0, overdriveUntil: 0, pierceUntil: 0, bloodUntil: 0, reflectUntil: 0, stormUntil: 0, siphonUntil: 0, speedUntil: 0 };
@@ -742,10 +910,14 @@ canvas.addEventListener('mousemove', (e) => {
   sendInput(false);
 });
 canvas.addEventListener('mousedown', (e) => {
+  if (isSpectating) return;
   if (e.button === 0) { keys.shooting = true; sendInput(true); }
   else if (e.button === 2) tryLocalAbility();
 });
-canvas.addEventListener('mouseup', (e) => { if (e.button === 0) { keys.shooting = false; sendInput(true); } });
+canvas.addEventListener('mouseup', (e) => {
+  if (isSpectating) return;
+  if (e.button === 0) { keys.shooting = false; sendInput(true); }
+});
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => {
   cam.targetScale = clamp(cam.targetScale * (e.deltaY < 0 ? 1.12 : 0.89), 0.55, 1.5);
@@ -753,6 +925,17 @@ canvas.addEventListener('wheel', (e) => {
 
 window.addEventListener('keydown', (e) => {
   const c = e.code;
+  if (isSpectating && joined) {
+    if (c === 'Tab') { e.preventDefault(); cycleFollow(1); return; }
+    if (c === 'KeyF') { freeCam = !freeCam; if (freeCam) followId = null; else cycleFollow(0); return; }
+    if (c === 'KeyW' || c === 'ArrowUp') keys.up = true;
+    else if (c === 'KeyS' || c === 'ArrowDown') keys.down = true;
+    else if (c === 'KeyA' || c === 'ArrowLeft') keys.left = true;
+    else if (c === 'KeyD' || c === 'ArrowRight') keys.right = true;
+    else if (c === 'F3') { showLatency = !showLatency; e.preventDefault(); }
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(c)) e.preventDefault();
+    return;
+  }
   if (c === 'KeyW' || c === 'ArrowUp') keys.up = true;
   else if (c === 'KeyS' || c === 'ArrowDown') keys.down = true;
   else if (c === 'KeyA' || c === 'ArrowLeft') keys.left = true;
@@ -769,14 +952,41 @@ window.addEventListener('keyup', (e) => {
   else if (c === 'KeyS' || c === 'ArrowDown') keys.down = false;
   else if (c === 'KeyA' || c === 'ArrowLeft') keys.left = false;
   else if (c === 'KeyD' || c === 'ArrowRight') keys.right = false;
-  sendInput(true);
+  if (!isSpectating) sendInput(true);
 });
+
+function cycleFollow(dir) {
+  const ids = [...snapB.keys()].filter((id) => {
+    const b = snapB.get(id);
+    return b && b.alive === 1;
+  }).sort((a, b) => a - b);
+  if (!ids.length) { followId = null; return; }
+  freeCam = false;
+  if (followId == null || dir === 0) {
+    // 默认跟击杀最高
+    let best = ids[0], bestK = -1;
+    for (const id of ids) {
+      const name = snapB.get(id).name;
+      const row = lb.find((r) => r[0] === name);
+      const k = row ? row[1] : 0;
+      if (k > bestK) { bestK = k; best = id; }
+    }
+    followId = best;
+    return;
+  }
+  let idx = ids.indexOf(followId);
+  if (idx < 0) idx = 0;
+  else idx = (idx + dir + ids.length) % ids.length;
+  followId = ids[idx];
+}
 
 let lastSend = 0;
 function sendEvent(e) {
+  if (isSpectating) return;
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'e', e }));
 }
 function sendInput(force) {
+  if (isSpectating) return;
   if (!ws || ws.readyState !== 1) return;
   const now = performance.now();
   if (!force && now - lastSend < 8) return;
@@ -1010,16 +1220,31 @@ function frame(now) {
     const dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
 
     // 未入局时只清屏，避免登录页重渲染吃 GPU
-    if (myId == null) {
+    if (!joined) {
       clearScreen('#070a14');
       requestAnimationFrame(frame);
       return;
     }
 
     // 自身预测 + 相机
-    const me = snapB.get(myId);
+    const me = myId != null ? snapB.get(myId) : null;
     const nowMs = Date.now();
-    if (alive && me && me.alive === 1) {
+    if (isSpectating) {
+      if (!freeCam) {
+        if (followId == null || !snapB.has(followId) || snapB.get(followId).alive !== 1) cycleFollow(0);
+        const fol = followId != null ? snapB.get(followId) : null;
+        if (fol) {
+          cam.x = lerp(cam.x, fol.x, 0.18);
+          cam.y = lerp(cam.y, fol.y, 0.18);
+        }
+      } else {
+        const pan = 520 * dt;
+        if (keys.left) cam.x -= pan;
+        if (keys.right) cam.x += pan;
+        if (keys.up) cam.y -= pan;
+        if (keys.down) cam.y += pan;
+      }
+    } else if (alive && me && me.alive === 1) {
       predictStep(dt);
       if (localFireCd > 0) localFireCd -= dt;
       if (keys.shooting && localFireCd <= 0) doLocalShoot();
@@ -1425,38 +1650,61 @@ function drawNameHp(x, y, name, hp, max, isMe) {
 }
 
 function updateDomHud(now) {
-  const cls = CLASSES[myCls] || CLASSES[0];
+  const specEl = $('hudSpec');
+  if (isSpectating) {
+    specEl.classList.remove('hidden');
+    if (freeCam) {
+      specEl.innerHTML = '观战 · 自由视角<span class="hint">Tab 跟随 · F 切换 · WASD 平移</span>';
+    } else {
+      const fol = followId != null ? snapB.get(followId) : null;
+      const nm = fol ? fol.name : '—';
+      specEl.innerHTML = '观战 · 跟随 <b style="color:#2eccff">' + nm + '</b><span class="hint">Tab 切换 · F 自由视角</span>';
+    }
+    $('hudCls').textContent = '👁️ 观战模式';
+    $('hudMeta').textContent = '地狱 Bot 常驻混战 · 你可随时回大厅重进';
+    $('hudHpBar').style.width = '0%';
+    $('hudHpTxt').textContent = '—';
+    $('hudEnBar').style.width = '0%';
+    $('hudEnTxt').textContent = '能量 —';
+    $('hudDash').textContent = '冲刺 —';
+    $('hudDash').className = 'cd';
+    $('hudAb').textContent = '技能 —';
+    $('hudAb').className = 'cd';
+  } else {
+    specEl.classList.add('hidden');
+    const cls = CLASSES[myCls] || CLASSES[0];
+    $('hudCls').textContent = (cls.ico ? cls.ico + ' ' : '') + cls.name;
+    const asst = my.assists || 0;
+    const stk = my.streak || 0;
+    $('hudMeta').textContent = '击杀 ' + my.kills + ' · 助攻 ' + asst + ' · 死亡 ' + my.deaths + (stk >= 2 ? ' · 连杀 ' + stk : '');
+
+    const maxHp = my.maxHp > 0 ? my.maxHp : 1;
+    const hpFrac = clamp(my.hp / maxHp, 0, 1);
+    const en = Number(my.energy) || 0;
+    const hpBar = $('hudHpBar');
+    hpBar.style.width = (hpFrac * 100).toFixed(1) + '%';
+    hpBar.style.background = hpFrac > 0.5 ? '#4cd97b' : hpFrac > 0.25 ? '#ffd166' : '#ff5c5c';
+    $('hudHpTxt').textContent = (my.hp | 0) + '/' + (my.maxHp | 0);
+    $('hudEnBar').style.width = clamp(en / 100, 0, 1) * 100 + '%';
+    $('hudEnTxt').textContent = '能量 ' + (en | 0);
+
+    const dashCd = Number(my.dashCd) || 0;
+    const abilityCd = Number(my.abilityCd) || 0;
+    const dashReady = en >= cls.dashCost && dashCd <= 0;
+    const abReady = abilityCd <= 0;
+    const dashEl = $('hudDash');
+    const abEl = $('hudAb');
+    dashEl.className = dashReady ? 'ok' : 'cd';
+    dashEl.textContent = '冲刺 ' + (dashReady ? '就绪' : dashCd.toFixed(1) + 's');
+    abEl.className = abReady ? 'ab' : 'cd';
+    abEl.textContent = cls.ability + ' ' + (abReady ? '就绪' : abilityCd.toFixed(1) + 's');
+  }
+
   const mapEl = $('hudMap');
   if (mapInfo.name) {
     mapEl.style.display = '';
     mapEl.textContent = mapInfo.name + (mapInfo.tag ? ' · ' + mapInfo.tag : '');
   } else mapEl.style.display = 'none';
-
-  $('hudCls').textContent = (cls.ico ? cls.ico + ' ' : '') + cls.name;
-  const asst = my.assists || 0;
-  const stk = my.streak || 0;
-  $('hudMeta').textContent = '击杀 ' + my.kills + ' · 助攻 ' + asst + ' · 死亡 ' + my.deaths + (stk >= 2 ? ' · 连杀 ' + stk : '');
-
-  const maxHp = my.maxHp > 0 ? my.maxHp : 1;
-  const hpFrac = clamp(my.hp / maxHp, 0, 1);
-  const en = Number(my.energy) || 0;
-  const hpBar = $('hudHpBar');
-  hpBar.style.width = (hpFrac * 100).toFixed(1) + '%';
-  hpBar.style.background = hpFrac > 0.5 ? '#4cd97b' : hpFrac > 0.25 ? '#ffd166' : '#ff5c5c';
-  $('hudHpTxt').textContent = (my.hp | 0) + '/' + (my.maxHp | 0);
-  $('hudEnBar').style.width = clamp(en / 100, 0, 1) * 100 + '%';
-  $('hudEnTxt').textContent = '能量 ' + (en | 0);
-
-  const dashCd = Number(my.dashCd) || 0;
-  const abilityCd = Number(my.abilityCd) || 0;
-  const dashReady = en >= cls.dashCost && dashCd <= 0;
-  const abReady = abilityCd <= 0;
-  const dashEl = $('hudDash');
-  const abEl = $('hudAb');
-  dashEl.className = dashReady ? 'ok' : 'cd';
-  dashEl.textContent = '冲刺 ' + (dashReady ? '就绪' : dashCd.toFixed(1) + 's');
-  abEl.className = abReady ? 'ab' : 'cd';
-  abEl.textContent = cls.ability + ' ' + (abReady ? '就绪' : abilityCd.toFixed(1) + 's');
 
   // 排行榜
   const lbEl = $('hudLb');
@@ -1508,11 +1756,12 @@ function updateDomHud(now) {
   if (!showLatency) lat.classList.add('hidden');
   else {
     lat.classList.remove('hidden');
-    const me = snapB.get(myId);
+    const me = myId != null ? snapB.get(myId) : null;
     const myPing = me ? (me.ping || 0) : 0;
     const myJit = me ? (me.jitter || 0) : 0;
     let html = '<div class="title">延迟自检 · F3 隐藏</div>';
-    html += '<div>我 · ' + myPing + 'ms' + (myJit ? ' · 抖动 ' + myJit + 'ms' : '') + ' · 误差 ' + myPredErr.toFixed(1) + 'px</div>';
+    if (isSpectating) html += '<div>观战模式</div>';
+    else html += '<div>我 · ' + myPing + 'ms' + (myJit ? ' · 抖动 ' + myJit + 'ms' : '') + ' · 误差 ' + myPredErr.toFixed(1) + 'px</div>';
     for (const [id, b] of snapB) {
       if (id === myId || b.alive !== 1) continue;
       html += '<div style="color:' + latColor(b.ping || 0) + '">' + truncate(b.name, 10) + ' · ' + (b.ping || 0) + 'ms</div>';
@@ -1608,6 +1857,7 @@ function drawMinimap() {
 }
 
 function drawCrosshair() {
+  if (isSpectating) return;
   if (!alive) return;
   const x = mouse.x, y = mouse.y;
   const pulse = hitConfirm > 0.05 ? 1 + hitConfirm * 0.55 : 1;
@@ -1629,8 +1879,9 @@ function drawCrosshair() {
 }
 
 /* ================= 启动 ================= */
-$('startBtn').addEventListener('click', () => { ensureAudio(); connect(); });
-$('nameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { ensureAudio(); connect(); } });
+$('startBtn').addEventListener('click', () => { ensureAudio(); connect(false); });
+$('spectateBtn').addEventListener('click', () => { ensureAudio(); connect(true); });
+$('nameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { ensureAudio(); connect(false); } });
 $('nameInput').addEventListener('input', () => {
   const inp = $('nameInput');
   inp.classList.remove('shake');
@@ -1640,7 +1891,7 @@ $('reconnectBtn').addEventListener('click', () => location.reload());
 window.addEventListener('beforeunload', () => { window.__leaving = true; if (ws) ws.close(); });
 
 setInterval(() => {
-  if (!alive && myId != null) {
+  if (!isSpectating && !alive && myId != null) {
     const remaining = Math.max(0, 2.5 - (Date.now() - lastDeathTime) / 1000);
     $('countdown').textContent = remaining.toFixed(1);
   }

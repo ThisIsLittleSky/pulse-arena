@@ -11,10 +11,16 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const hellBots = require('./hell-bots');
+const agentExec = require('./agent-exec');
+const agentBrief = require('./agent-brief');
 
 const PORT = Number(process.env.PORT) || 4001;
 const HOST = '0.0.0.0';
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const MAX_MCP_AGENTS = Math.max(1, Math.min(8, Number(process.env.MAX_MCP_AGENTS) || 4));
+const AGENT_TOKEN = process.env.AGENT_TOKEN || '';
+const AGENT_IDLE_MS = Math.max(3000, Number(process.env.AGENT_IDLE_MS) || 8000);
+const AGENT_INTENT_MIN_MS = 1000 / 8; // 最多 8 次意图/秒
 
 /* ============================ 常量 ============================ */
 const ARENA_R = 1300;
@@ -281,7 +287,17 @@ let snapSeq = 0; // 偶数 tick 才广播，逻辑 60Hz / 快照 30Hz
 
 const countHumans = () => {
   let n = 0;
-  for (const p of players.values()) if (!p.isBot) n++;
+  for (const p of players.values()) if (!p.isBot && !p.isAgent) n++;
+  return n;
+};
+const countAgents = () => {
+  let n = 0;
+  for (const p of players.values()) if (p.isAgent) n++;
+  return n;
+};
+const countBots = () => {
+  let n = 0;
+  for (const p of players.values()) if (p.isBot) n++;
   return n;
 };
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
@@ -344,7 +360,7 @@ function startMapPick(winner) {
   const now = Date.now();
   mapPickUntil = now + MAP_PICK_MS;
   mapPickWinnerId = winner ? winner.id : null;
-  botMapPickAt = (winner && winner.isBot) ? now + 1600 : 0;
+  botMapPickAt = (winner && (winner.isBot || winner.isAgent)) ? now + 1600 : 0;
   for (const pl of players.values()) {
     pl.kills = 0; pl.deaths = 0; pl.assists = 0; pl.streak = 0;
     if (pl.dmgFrom) pl.dmgFrom.clear();
@@ -484,6 +500,10 @@ function respawn(p, now) {
   p.invulnUntil = now + SPAWN_GRACE_MS;
   if (p.dmgFrom) p.dmgFrom.clear();
   if (p.socket) sendJSON(p.socket, { t: 'respawn' });
+  if (p.isAgent) {
+    pushAgentEvent(p, { type: 'respawn' });
+    agentExec.setIntent(p, 'engage', {}, now, agentExec.INTENT_DEFAULT_MS);
+  }
 }
 
 function mapPayload() {
@@ -631,7 +651,15 @@ function handleMessage(socket, msg) {
     socket._spectator = true;
     spectators.add(socket);
     sendJSON(socket, initPayload({ id: null, spectate: true }));
-    log(`👁️ 观战加入 (观战 ${spectators.size} · 玩家 ${countHumans()} · Bot ${players.size - countHumans()})`);
+    log(`👁️ 观战加入 (观战 ${spectators.size} · 人类 ${countHumans()} · Bot ${countBots()} · Agent ${countAgents()})`);
+    return;
+  }
+
+  // —— MCP Agent 协议 ——
+  if (msg.t === 'agentStatus' || msg.t === 'agentSpectateSummary' || msg.t === 'agentJoin'
+    || msg.t === 'agentIntent' || msg.t === 'agentObserve' || msg.t === 'agentLeave' || msg.t === 'agentHeartbeat'
+    || msg.t === 'agentPlaybook' || msg.t === 'agentTactics') {
+    handleAgentMessage(socket, msg);
     return;
   }
 
@@ -684,6 +712,216 @@ function handleMessage(socket, msg) {
         p.jitter = Math.round((p.jitter || dev) * 0.7 + dev * 0.3);
       }
     }
+  }
+}
+
+function agentAuthOk(msg) {
+  if (!AGENT_TOKEN) return true;
+  return msg && msg.token === AGENT_TOKEN;
+}
+
+function resolveClassIndex(msg) {
+  if (msg.classIndex != null && Number.isFinite(Number(msg.classIndex))) {
+    return clamp(Math.round(Number(msg.classIndex)), 0, CLASSES.length - 1);
+  }
+  if (msg.cls != null && Number.isFinite(Number(msg.cls))) {
+    return clamp(Math.round(Number(msg.cls)), 0, CLASSES.length - 1);
+  }
+  if (msg.classKey) {
+    const key = String(msg.classKey);
+    const idx = CLASSES.findIndex((c) => c.key === key);
+    if (idx >= 0) return idx;
+  }
+  return 0;
+}
+
+function agentWorld(now) {
+  return {
+    now, players, proj, obstacles, pickups, healPads, safeR, zones, walls,
+    spectators, CLASSES, COLORS, SHIP_R, ENERGY_MAX, ARENA_R, TARGET_KILLS,
+    mapMeta, mapPickUntil, botCount, botsFight,
+    tryDash, tryAbility
+  };
+}
+
+function pushAgentEvent(p, ev) {
+  if (!p || !p.isAgent) return;
+  if (!p.agentEvents) p.agentEvents = [];
+  p.agentEvents.push(Object.assign({ at: Date.now() }, ev));
+  if (p.agentEvents.length > 20) p.agentEvents.splice(0, p.agentEvents.length - 20);
+}
+
+function removeAgentPlayer(p, reason) {
+  if (!p || !p.isAgent) return;
+  players.delete(p.id);
+  turrets = turrets.filter((t) => t.ownerId !== p.id);
+  zones = zones.filter((z) => z.ownerId !== p.id);
+  walls = walls.filter((w) => w.ownerId !== p.id);
+  lbDirty = true;
+  log(`🟣 Agent 离场: ${p.name} (${reason || 'leave'}) · 剩余 Agent ${countAgents()}`);
+}
+
+function agentCatalogCtx() {
+  return {
+    CLASSES, COLORS, MAPS, TARGET_KILLS, PORT,
+    lanIP, AGENT_TOKEN, MAX_MCP_AGENTS,
+    botCount, botsFight, mapMeta,
+    countHumans, countBots, countAgents
+  };
+}
+
+function handleAgentMessage(socket, msg) {
+  if (!agentAuthOk(msg)) {
+    sendJSON(socket, { t: 'agentErr', err: 'unauthorized', msg: 'AGENT_TOKEN 不匹配' });
+    return;
+  }
+
+  if (msg.t === 'agentPlaybook') {
+    const catalog = agentBrief.buildCatalog(agentCatalogCtx());
+    sendJSON(socket, {
+      t: 'agentPlaybook',
+      catalog,
+      playbook: agentBrief.buildPlaybookMarkdown(catalog)
+    });
+    return;
+  }
+
+  if (msg.t === 'agentStatus') {
+    sendJSON(socket, { t: 'agentStatus', status: agentExec.buildStatus(agentWorld(Date.now())) });
+    return;
+  }
+
+  if (msg.t === 'agentSpectateSummary') {
+    sendJSON(socket, {
+      t: 'agentSpectateSummary',
+      summary: agentExec.buildSpectateSummary(Object.assign(agentWorld(Date.now()), { now: Date.now() }))
+    });
+    return;
+  }
+
+  if (msg.t === 'agentJoin') {
+    if (socket._spectator) {
+      sendJSON(socket, { t: 'agentErr', err: 'spectator' });
+      return;
+    }
+    if (socket._player) {
+      sendJSON(socket, { t: 'agentErr', err: 'already_joined', agentId: socket._player.id });
+      return;
+    }
+    if (countAgents() >= MAX_MCP_AGENTS) {
+      sendJSON(socket, { t: 'agentErr', err: 'full', max: MAX_MCP_AGENTS });
+      return;
+    }
+    const cls = resolveClassIndex(msg);
+    const ci = clamp(Number(msg.ci) || Number(msg.colorIndex) || 0, 0, COLORS.length - 1);
+    const humansBefore = countHumans();
+    const player = makePlayer(msg.name || 'MCP特工', cls, ci);
+    setStats(player);
+    player.isAgent = true;
+    player.socket = socket;
+    player.agent = { strafe: 1, flipAt: 0, dodgeUntil: 0, lastAutoDodge: 0, lastIntentAt: 0, lastAutoAbility: 0 };
+    player.agentEvents = [];
+    player.lastAgentSeen = Date.now();
+    player.tactics = agentBrief.normalizeTactics({ preset: 'balanced', autopilot: true });
+    agentExec.setIntent(player, 'engage', {}, Date.now(), agentExec.INTENT_DEFAULT_MS);
+    socket._player = player;
+    players.set(player.id, player);
+    lbDirty = true;
+    if (humansBefore === 0 && countAgents() === 1 && !mapPickUntil && msg.map) {
+      loadMap(resolveMapIndex(msg.map));
+    }
+    const obs = agentExec.buildObserve(player, agentWorld(Date.now()), []);
+    sendJSON(socket, {
+      t: 'agentJoined',
+      agentId: player.id,
+      name: player.name,
+      cls: player.cls,
+      classKey: CLASSES[player.cls].key,
+      className: CLASSES[player.cls].name,
+      observe: obs,
+      intents: [...agentExec.VALID_INTENTS],
+      hint: 'After join: set_tactics, then loop observe and ALWAYS tell the user 【战况】+【判断】.'
+    });
+    log(`🟣 Agent 进场: ${player.name}(${CLASSES[player.cls].name}) · Agent ${countAgents()}/${MAX_MCP_AGENTS}`);
+    return;
+  }
+
+  const p = socket._player;
+  if (!p || !p.isAgent) {
+    if (msg.t !== 'agentJoin') {
+      sendJSON(socket, { t: 'agentErr', err: 'not_joined' });
+    }
+    return;
+  }
+  p.lastAgentSeen = Date.now();
+
+  if (msg.t === 'agentHeartbeat') {
+    sendJSON(socket, { t: 'agentOk', alive: p.alive, agentId: p.id, tactics: p.tactics || null });
+    return;
+  }
+
+  if (msg.t === 'agentTactics') {
+    p.tactics = agentBrief.normalizeTactics(msg.tactics || msg);
+    // 立刻按新战术刷一条意图
+    const next = agentBrief.nextIntentFromTactics(p, agentWorld(Date.now()));
+    agentExec.setIntent(p, next.type, next.params || {}, Date.now(), agentExec.INTENT_DEFAULT_MS);
+    log(`🟣 [Agent] ${p.name} 战术=${p.tactics.preset} autopilot=${p.tactics.autopilot}`);
+    sendJSON(socket, { t: 'agentTacticsOk', tactics: p.tactics, intent: p.intent });
+    return;
+  }
+
+  if (msg.t === 'agentLeave') {
+    removeAgentPlayer(p, 'leave');
+    socket._player = null;
+    sendJSON(socket, { t: 'agentLeft', ok: true });
+    return;
+  }
+
+  if (msg.t === 'agentObserve') {
+    const since = Number(msg.sinceSeq) || 0;
+    let events = p.agentEvents || [];
+    if (since > 0) events = events.filter((e) => (e.seq || e.at) > since);
+    const obs = agentExec.buildObserve(p, agentWorld(Date.now()), events.slice(-12));
+    obs.seq = Date.now();
+    sendJSON(socket, { t: 'agentObserve', observe: obs });
+    return;
+  }
+
+  if (msg.t === 'agentIntent') {
+    if (mapPickUntil) {
+      sendJSON(socket, { t: 'agentActResult', ok: false, err: 'map_pick' });
+      return;
+    }
+    if (!p.alive) {
+      sendJSON(socket, { t: 'agentActResult', ok: false, err: 'waiting_respawn' });
+      return;
+    }
+    const now = Date.now();
+    if (now - (p.agent.lastIntentAt || 0) < AGENT_INTENT_MIN_MS) {
+      sendJSON(socket, { t: 'agentActResult', ok: false, err: 'rate_limited' });
+      return;
+    }
+    p.agent.lastIntentAt = now;
+    const type = String(msg.intent || msg.type || 'engage');
+    const params = msg.params || {};
+    if (msg.targetId != null) params.targetId = msg.targetId;
+    if (msg.targetName) params.targetName = msg.targetName;
+    if (msg.aggressive != null) params.aggressive = msg.aggressive;
+    if (msg.dashDir) params.dashDir = msg.dashDir;
+    if (msg.pickupType != null) params.pickupType = msg.pickupType;
+    const dur = msg.durationMs != null ? Number(msg.durationMs) : agentExec.INTENT_DEFAULT_MS;
+    const res = agentExec.setIntent(p, type, params, now, dur);
+    if (!res.ok) {
+      sendJSON(socket, { t: 'agentActResult', ok: false, err: res.err, valid: [...agentExec.VALID_INTENTS] });
+      return;
+    }
+    log(`🟣 [Agent] ${p.name} 意图=${type}` + (params.targetName || params.targetId != null ? ` target=${params.targetName || params.targetId}` : ''));
+    sendJSON(socket, {
+      t: 'agentActResult',
+      ok: true,
+      intent: { type: res.intent.type, until: res.intent.until, leftMs: res.intent.until - now, params: res.intent.params }
+    });
+    return;
   }
 }
 
@@ -943,6 +1181,8 @@ function kill(p, killerId, now) {
     streak = killer.streak;
   }
   if (p.socket) sendJSON(p.socket, { t: 'death', by: kname });
+  if (p.isAgent) pushAgentEvent(p, { type: 'death', by: kname });
+  if (killer && killer.isAgent) pushAgentEvent(killer, { type: 'kill', victim: p.name, streak });
   broadcast({ t: 'kill', k: kname, v: p.name, ci: killer ? killer.ci : 0, streak });
   lbDirty = true;
   if (killer && killer.kills >= TARGET_KILLS && !mapPickUntil) roundWin(killer);
@@ -978,10 +1218,11 @@ function tick(now, dt) {
     return;
   }
 
-  // 地狱 Bot 决策（写入 moveX/moveY/angle/shooting，再走同一套物理）
+  // 地狱 Bot + MCP Agent 决策（写入 moveX/moveY/angle/shooting，再走同一套物理）
   const world = botWorld(now, dt);
   for (const p of players.values()) {
     if (p.isBot) hellBots.updateBot(p, world);
+    else if (p.isAgent) agentExec.updateAgent(p, world);
   }
 
   // 脉冲井缩圈
@@ -1458,6 +1699,19 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(getConfigPayload()));
     return;
   }
+  if (url === '/agent' || url === '/agent/' || url === '/agent/playbook.md') {
+    const catalog = agentBrief.buildCatalog(agentCatalogCtx());
+    const md = agentBrief.buildPlaybookMarkdown(catalog);
+    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(md);
+    return;
+  }
+  if (url === '/agent/catalog.json') {
+    const catalog = agentBrief.buildCatalog(agentCatalogCtx());
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(catalog, null, 2));
+    return;
+  }
   const file = url === '/' ? '/index.html'
     : (url === '/admin' ? '/admin.html'
     : (url === '/favicon.ico' ? '/favicon.svg' : url));
@@ -1503,6 +1757,10 @@ function onClose(socket) {
   }
   const p = socket._player;
   if (!p) return;
+  if (p.isAgent) {
+    removeAgentPlayer(p, 'disconnect');
+    return;
+  }
   players.delete(p.id);
   turrets = turrets.filter((t) => t.ownerId !== p.id);
   zones = zones.filter((z) => z.ownerId !== p.id);
@@ -1514,6 +1772,16 @@ function onClose(socket) {
 setInterval(() => {
   const now = Date.now();
   for (const p of players.values()) {
+    if (p.isAgent) {
+      if (now - (p.lastAgentSeen || 0) > AGENT_IDLE_MS) {
+        const sock = p.socket;
+        removeAgentPlayer(p, 'idle');
+        if (sock) {
+          try { sock._player = null; } catch (_) {}
+        }
+      }
+      continue;
+    }
     if (!p.socket) continue;
     if (now - p.socket._lastSeen > 60000) { p.socket.destroy(); continue; }
     const h = Buffer.alloc(2); h[0] = 0x89; h[1] = 0;
@@ -1524,7 +1792,7 @@ setInterval(() => {
     const h = Buffer.alloc(2); h[0] = 0x89; h[1] = 0;
     s.write(h);
   }
-}, 20000);
+}, 2000);
 
 setInterval(() => {
   const ts = Date.now();
@@ -1557,6 +1825,13 @@ server.listen(PORT, HOST, () => {
   console.log('  地图: ' + MAPS.map((m) => m.name).join(' / '));
   console.log('  职业: ' + CLASSES.length + ' 款 · 开局/回合后可选图或随机');
   console.log('  地狱 Bot:    ' + botCount + ' 台 · 互殴 ' + (botsFight ? '开' : '关') + ' (首页可调)');
+  console.log('  MCP Agent:   最多 ' + MAX_MCP_AGENTS + ' · token ' + (AGENT_TOKEN ? '已启用' : '关闭(建议局域网设 AGENT_TOKEN)'));
+  console.log('  Agent手册:   http://localhost:' + PORT + '/agent');
+  console.log('              http://' + lanIP() + ':' + PORT + '/agent');
+  console.log('  MCP 接入:    docs/mcp-接入说明书.md');
+  if (!AGENT_TOKEN) {
+    console.log('  ⚠ 未设置 AGENT_TOKEN：局域网内任意客户端可 agentJoin');
+  }
   console.log('========================================================');
 });
 

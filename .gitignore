@@ -10,8 +10,9 @@ Thumbs.db
 *.swp
 *.swo
 
-# Node (project is zero-dependency, but ignore if present)
+# Node (game is zero-dependency; mcp/ has its own package)
 node_modules/
+mcp/node_modules/
 npm-debug.log*
 .env
 .env.*

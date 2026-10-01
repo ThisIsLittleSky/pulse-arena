@@ -357,5 +357,10 @@ module.exports = {
   DEFAULT_BOT_COUNT,
   syncBots,
   ensureBots,
-  updateBot
+  updateBot,
+  preferredRange,
+  hasLOS,
+  leadAim,
+  nearestPickup,
+  coverPoint
 };

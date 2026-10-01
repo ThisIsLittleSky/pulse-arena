@@ -1,0 +1,20 @@
+{
+  "name": "pulse-arena-mcp",
+  "version": "1.0.0",
+  "description": "MCP bridge so LLMs can join Pulse Arena via high-level intents",
+  "main": "src/server.js",
+  "bin": {
+    "pulse-arena-mcp": "./src/server.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "postinstall": "node -e \"console.log('pulse-arena-mcp ready. Point Cursor MCP at: node '+require('path').join(__dirname,'src/server.js'))\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.24.2"
+  }
+}

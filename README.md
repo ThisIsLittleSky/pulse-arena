@@ -25,6 +25,8 @@
 - 📦 **真正零依赖**：原生 `http` + 手写 WebSocket（RFC 6455），无 npm 包
 - 🛰️ **服务端权威**：60 tick/s 快照广播，配合客户端预测、幽灵子弹与远程外推
 - 🤖 **14 款机甲 · 8 张地图**：定位差异明显，回合胜利后进入选图（可选/随机，超时随机）
+- 👁️ **观战 / 地狱 Bot**：首页可调 Bot 数量；观战跟随或自由视角
+- 🧠 **MCP 大模型联机**：外部 LLM 经高层意图进场（局域网说明与提示词见 [docs/mcp-接入说明书.md](docs/mcp-接入说明书.md)）
 - 🛠️ **热更后台**：`/admin` 可在线调整机甲数值与目标击杀数
 
 
@@ -65,15 +67,19 @@ node server.js
 | 变量     | 说明                  | 默认     |
 | ------ | ------------------- | ------ |
 | `PORT` | HTTP / WebSocket 端口 | `4001` |
+| `AGENT_TOKEN` | MCP Agent 进场口令（局域网建议设置） | 空（不校验） |
+| `MAX_MCP_AGENTS` | 同时在场的 MCP 机体上限 | `4` |
 
 
 ```bash
 # Windows PowerShell
-$env:PORT=8080; node server.js
+$env:PORT=8080; $env:AGENT_TOKEN="your-secret"; node server.js
 
 # Linux / macOS
-PORT=8080 node server.js
+PORT=8080 AGENT_TOKEN=your-secret node server.js
 ```
+
+MCP / 大模型：局域网接入、操作边界、提示词见 [docs/mcp-接入说明书.md](docs/mcp-接入说明书.md)。
 
 
 

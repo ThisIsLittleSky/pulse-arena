@@ -1,0 +1,17 @@
+# Runtime / local
+config.json
+*.log
+.DS_Store
+Thumbs.db
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node (project is zero-dependency, but ignore if present)
+node_modules/
+npm-debug.log*
+.env
+.env.*

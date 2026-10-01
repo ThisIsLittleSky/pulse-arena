@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理后台 · 脉冲竞技场</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root { --bg: #0a0e1a; --card: #131a2e; --line: rgba(255,255,255,0.09); --accent: #7c5cff; --ok: #4cd97b; --err: #ff6b8a; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { min-height: 100vh; background: radial-gradient(1000px 600px at 50% 0%, #131a30, var(--bg)); color: #e8ecf6; font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; padding: 24px; }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 24px; letter-spacing: 1px; margin-bottom: 4px; }
+  .sub { color: #8b96b5; font-size: 13px; margin-bottom: 18px; }
+  .hidden { display: none !important; }
+
+  .login-box { max-width: 360px; margin: 12vh auto 0; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.4); }
+  .login-box input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,0.05); color: #fff; text-align: center; font-size: 16px; outline: none; }
+  .login-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,92,255,0.25); }
+  .login-box button { width: 100%; margin-top: 12px; padding: 12px; border: none; border-radius: 10px; background: linear-gradient(90deg, #7c5cff, #ff5c8a); color: #fff; font-weight: 700; font-size: 16px; cursor: pointer; }
+
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; margin-bottom: 16px; }
+  .topbar .tgt { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #aab4cf; }
+  .topbar .tgt input { width: 70px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,0.05); color: #fff; font-size: 14px; text-align: center; outline: none; }
+  .btns { display: flex; gap: 10px; }
+  button { cursor: pointer; border: none; border-radius: 10px; padding: 10px 16px; font-size: 14px; font-weight: 700; color: #fff; }
+  #saveBtn { background: linear-gradient(90deg, #2eccff, #7c5cff); }
+  #resetBtn { background: rgba(255,255,255,0.08); border: 1px solid var(--line); }
+  button:hover { filter: brightness(1.12); }
+
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr 1fr 1fr; } }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+
+  .cls { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .cls-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .cls-head .ico { font-size: 26px; }
+  .cls-head .name { font-size: 17px; font-weight: 800; }
+  .cls-head .tag { font-size: 11px; color: #8b96b5; }
+  .ability { font-size: 12px; color: #ffd166; margin-bottom: 10px; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .fields label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #aab4cf; }
+  .fields input { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,0.05); color: #fff; font-size: 13px; outline: none; width: 100%; }
+  .fields input:focus { border-color: var(--accent); }
+  .derived { margin-top: 10px; font-size: 11.5px; color: #8b96b5; }
+  .derived b { color: #4cd97b; }
+
+  .status { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 10px 20px; border-radius: 10px; font-size: 14px; background: rgba(8,12,24,0.9); border: 1px solid var(--line); opacity: 0; transition: opacity .3s; }
+  .status.show { opacity: 1; }
+  .status.ok { color: var(--ok); border-color: rgba(76,217,123,0.4); }
+  .status.err { color: var(--err); border-color: rgba(255,107,138,0.4); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚙️ 脉冲竞技场 · 管理后台</h1>
+  <div class="sub">实时调控全部机甲属性（现 14 款），保存后立即对所有在线玩家生效并持久化到服务器。</div>
+
+  <div id="login" class="login-box">
+    <div style="font-size:40px">🔐</div>
+    <div style="margin:6px 0 16px;color:#aab4cf;font-size:14px">请输入管理员密码</div>
+    <input type="password" id="pw" placeholder="密码" autocomplete="off">
+    <button id="loginBtn">登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="topbar">
+      <div class="tgt">🏆 目标击杀 <input type="number" id="targetKills" min="1" step="1"></div>
+      <div class="btns">
+        <button id="saveBtn">💾 保存并生效</button>
+        <button id="resetBtn">↩️ 恢复默认</button>
+      </div>
+    </div>
+    <div class="grid" id="classes"></div>
+  </div>
+</div>
+<div id="status" class="status"></div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+
+const ICONS = {
+  assault: '⚔️', titan: '🛡️', phantom: '👻', sniper: '🎯', engineer: '🔧', berserker: '🩸',
+  binder: '🕸️', prism: '💎', beacon: '📡', demolisher: '💣', stormrider: '🌪️', weaver: '🧵', echo: '🪞', siphon: '💉'
+};
+const FIELDS = [
+  { k: 'hp', label: '生命 HP', step: 5 },
+  { k: 'speed', label: '移速', step: 5 },
+  { k: 'fireCd', label: '射击间隔(s)', step: 0.01 },
+  { k: 'dmg', label: '单发伤害', step: 1 },
+  { k: 'pSpeed', label: '弹速', step: 20 },
+  { k: 'pR', label: '弹丸半径', step: 0.5 },
+  { k: 'dashCd', label: '冲刺冷却(s)', step: 0.1 },
+  { k: 'dashCost', label: '冲刺耗能', step: 5 },
+  { k: 'abilityCd', label: '技能冷却(s)', step: 0.5 },
+  { k: 'lifesteal', label: '吸血比例', step: 0.05 }
+];
+
+let ws = null;
+let lastConfig = null;
+let statusTimer = null;
+
+function status(msg, type) {
+  const el = $('status');
+  el.textContent = msg;
+  el.className = 'status show ' + (type || 'ok');
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+function login() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto + '://' + location.host);
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'adminLogin', pw: $('pw').value }));
+  ws.onmessage = (e) => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.t === 'adminOk') {
+      lastConfig = m.config;
+      $('login').classList.add('hidden');
+      $('main').classList.remove('hidden');
+      render(m.config);
+      status('已同步最新配置', 'ok');
+    } else if (m.t === 'adminErr') {
+      status(m.msg || '错误', 'err');
+    }
+  };
+  ws.onclose = () => status('连接断开，请刷新页面重试', 'err');
+  ws.onerror = () => ws.close();
+}
+
+function render(config) {
+  $('targetKills').value = config.targetKills;
+  const grid = $('classes');
+  grid.innerHTML = '';
+  config.classes.forEach((c, i) => {
+    const card = document.createElement('div');
+    card.className = 'cls';
+    card.innerHTML =
+      '<div class="cls-head"><span class="ico">' + (ICONS[c.key] || '🤖') + '</span>' +
+      '<div><div class="name">' + c.name + '</div><div class="tag">' + c.tag + '</div></div></div>' +
+      '<div class="ability">✨ 技能：' + c.ability + '</div>' +
+      '<div class="fields"></div>' +
+      '<div class="derived">攻速 <b class="rate">--</b> /s · 秒伤 <b class="dps">--</b></div>';
+    const fields = card.querySelector('.fields');
+    FIELDS.forEach((f) => {
+      const label = document.createElement('label');
+      label.innerHTML = '<span>' + f.label + '</span>';
+      const input = document.createElement('input');
+      input.type = 'number'; input.step = f.step;
+      input.dataset.cls = i; input.dataset.field = f.k;
+      input.value = c[f.k] != null ? c[f.k] : 0;
+      label.appendChild(input);
+      fields.appendChild(label);
+    });
+    grid.appendChild(card);
+  });
+  grid.addEventListener('input', recompute);
+  recompute();
+}
+
+function recompute() {
+  document.querySelectorAll('#classes .cls').forEach((card, i) => {
+    const fireCd = parseFloat(card.querySelector('input[data-field="fireCd"]').value) || 0;
+    const dmg = parseFloat(card.querySelector('input[data-field="dmg"]').value) || 0;
+    card.querySelector('.rate').textContent = fireCd > 0 ? (1 / fireCd).toFixed(1) : '∞';
+    card.querySelector('.dps').textContent = fireCd > 0 ? Math.round(dmg / fireCd) : '∞';
+  });
+}
+
+function collect() {
+  const classes = lastConfig.classes.map((c) => ({ key: c.key, name: c.name, tag: c.tag, ability: c.ability }));
+  document.querySelectorAll('#classes input').forEach((inp) => {
+    const i = +inp.dataset.cls, k = inp.dataset.field;
+    classes[i][k] = parseFloat(inp.value);
+  });
+  return { targetKills: parseInt($('targetKills').value, 10), classes };
+}
+
+function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+
+$('loginBtn').addEventListener('click', login);
+$('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+$('saveBtn').addEventListener('click', () => {
+  const cfg = collect();
+  if (!cfg.classes.every((c) => FIELDS.every((f) => Number.isFinite(c[f.k])))) { status('存在非法数值，请检查', 'err'); return; }
+  lastConfig = cfg;
+  send({ t: 'adminSet', config: cfg });
+});
+$('resetBtn').addEventListener('click', () => { if (confirm('确定恢复为默认属性？')) send({ t: 'adminReset' }); });
+</script>
+</body>
+</html>
